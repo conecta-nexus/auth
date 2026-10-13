@@ -1,0 +1,25 @@
+# ==============================================================================
+# Conecta Nexus - Code Owners Matrix
+# ==============================================================================
+# Mandatory reviewer pairing policy for pull requests.
+# Every repository has exactly two assigned code owners.
+#
+# Developers:
+# - Anorak (@AnorakTeam) (@josemanuelufps)
+# - Juan   (@juandiegosb)
+# - Nelson (@NelsonConde)
+# ==============================================================================
+
+# Global fallback
+* @AnorakTeam @juandiegosb @NelsonConde @josemanuelufps
+
+# Repository-specific Code Owners mapping:
+# conecta-nexus/auth:         @AnorakTeam @NelsonConde
+# conecta-nexus/challenge:    @AnorakTeam @NelsonConde
+# conecta-nexus/profile:      @AnorakTeam @juandiegosb
+# conecta-nexus/application:  @AnorakTeam @juandiegosb
+# conecta-nexus/moderation:   @juandiegosb @NelsonConde
+# conecta-nexus/notification: @juandiegosb @NelsonConde
+# conecta-nexus/frontend:     @AnorakTeam @juandiegosb @NelsonConde
+# conecta-nexus/gateway:      @AnorakTeam @juandiegosb @NelsonConde
+# conecta-nexus/infra:        @AnorakTeam @juandiegosb @NelsonConde
