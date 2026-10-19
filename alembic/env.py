@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from src.core.config import settings
 from src.core.database import Base
-from src.models import User
+from src.models import PasswordResetToken, RefreshToken, User
 
 
 config = context.config
@@ -21,8 +21,11 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Importing User registers its table with the shared metadata used by Alembic.
-assert User.__table__.metadata is target_metadata
+# Importing all models registers their tables with the shared Alembic metadata.
+assert all(
+    model.__table__.metadata is target_metadata
+    for model in (User, RefreshToken, PasswordResetToken)
+)
 
 
 def run_migrations_offline() -> None:
