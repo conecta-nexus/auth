@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from typing import Final, List, Mapping
 
+from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
+
+
+_password_hash = PasswordHash.recommended()
+
 # JWT Cryptographic & OAuth2 Specifications
 JWT_ALGORITHM: Final[str] = "RS256"
 JWT_ISSUER: Final[str] = "https://auth.conectanexus.ufps.edu.co"
@@ -56,6 +62,19 @@ ROLE_SCOPES: Final[Mapping[str, list[str]]] = {
     "COMPANY": COMPANY_SCOPES,
     "ADMIN": ADMIN_SCOPES,
 }
+
+
+def hash_password(plain_password: str) -> str:
+    """Hash a password with Argon2id and a library-generated random salt."""
+    return _password_hash.hash(plain_password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Return whether a password matches a supported encoded hash."""
+    try:
+        return _password_hash.verify(plain_password, hashed_password)
+    except UnknownHashError:
+        return False
 
 
 def get_scopes_for_role(role: str) -> List[str]:
