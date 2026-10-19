@@ -1,8 +1,14 @@
 """Global pytest fixtures for auth microservice tests."""
 
+import os
 import uuid
 from datetime import timedelta
 from typing import Any, Dict
+
+# Establish safe, non-production environment variables before importing src
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test_user:test_password@localhost:5432/db_auth")
+os.environ.setdefault("DB_ECHO", "false")
+os.environ.setdefault("APP_ENV", "test")
 
 import pytest
 from fastapi.testclient import TestClient
