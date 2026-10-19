@@ -34,13 +34,14 @@ def load_migration() -> ModuleType:
     return migration
 
 
-def test_initial_migration_is_alembic_head() -> None:
+def test_initial_migration_remains_base_revision() -> None:
     migration = load_migration()
     script = ScriptDirectory.from_config(Config("alembic.ini"))
 
     assert migration.revision == "001"
     assert migration.down_revision is None
-    assert script.get_current_head() == "001"
+    assert script.get_base() == "001"
+    assert script.get_revision("001") is not None
     assert callable(migration.upgrade)
     assert callable(migration.downgrade)
 
