@@ -65,3 +65,10 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserStatusUpdate(BaseModel):
+    """Administrative request to activate or suspend a user account."""
+
+    is_active: bool
+    reason: str | None = None
