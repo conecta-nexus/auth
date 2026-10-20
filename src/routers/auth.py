@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.schemas.auth import VerifyResponse
+from src.core.database import get_db
+from src.schemas.auth import LoginRequest, TokenResponse, VerifyResponse
+from src.services.auth_service import (
+    InactiveAccountError,
+    InvalidCredentialsError,
+    login_user,
+)
 from src.services.jwt_service import InvalidTokenError, TokenExpiredError, decode_token
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -74,3 +81,51 @@ def verify_session(
         role=str(payload.get("role", "")),
         scopes=scopes,
     )
+
+
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    summary="OAuth2 password authentication and session initiation",
+    description=(
+        "Authenticates user credentials, verifies account active status, "
+        "issues RS256 access and refresh tokens, and records session metadata in db_auth."
+    ),
+    responses={
+        200: {"description": "Authentication successful, token pair issued"},
+        401: {"description": "Invalid email or password"},
+        403: {"description": "Account is inactive or suspended"},
+    },
+)
+async def login(
+    request: Request,
+    payload: LoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponse:
+    """Authenticate user with email and password, issuing access and refresh tokens."""
+    client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    user_agent = request.headers.get("user-agent")
+
+    try:
+        return await login_user(
+            db=db,
+            email=payload.email,
+            password=payload.password,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+    except InvalidCredentialsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except InactiveAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or suspended",
+        ) from exc

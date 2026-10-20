@@ -23,3 +23,10 @@ class TokenResponse(BaseModel):
     refresh_token: str = Field(description="RS256 signed refresh token")
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(default=900, description="Access token lifetime in seconds (15 minutes)")
+
+
+class LoginRequest(BaseModel):
+    """Payload for user credentials authentication (POST /login)."""
+
+    email: str = Field(description="User primary email address")
+    password: str = Field(description="User plaintext password")
