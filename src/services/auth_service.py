@@ -7,16 +7,20 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_DAYS,
+    hash_password,
     verify_password,
 )
 from src.models.token import RefreshToken
 from src.models.user import User
+from src.repositories.user_repository import UserRepository
 from src.schemas.auth import TokenResponse
+from src.schemas.user import UserCreate
 from src.services.jwt_service import create_access_token, create_refresh_token
 
 
@@ -30,6 +34,28 @@ class InvalidCredentialsError(AuthServiceError):
 
 class InactiveAccountError(AuthServiceError):
     """Raised when an authenticated user account has is_active = False."""
+
+
+class DuplicateEmailError(AuthServiceError):
+    """Raised when a registration email is already persisted."""
+
+
+async def register_user(db: AsyncSession, user_in: UserCreate) -> User:
+    """Register a validated public user and commit the transaction."""
+    existing_user = await UserRepository.get_by_email(db, str(user_in.email))
+    if existing_user is not None:
+        raise DuplicateEmailError("Email is already registered")
+
+    hashed_password = hash_password(user_in.password)
+
+    try:
+        user = await UserRepository.create(db, user_in, hashed_password)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise DuplicateEmailError("Email is already registered") from exc
+
+    return user
 
 
 def hash_token(token: str) -> str:

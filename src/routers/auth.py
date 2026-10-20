@@ -10,16 +10,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.schemas.auth import LoginRequest, TokenResponse, VerifyResponse
+from src.schemas.user import UserCreate, UserResponse
 from src.services.auth_service import (
+    DuplicateEmailError,
     InactiveAccountError,
     InvalidCredentialsError,
     login_user,
+    register_user,
 )
 from src.services.jwt_service import InvalidTokenError, TokenExpiredError, decode_token
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        201: {"description": "User account created"},
+        409: {"description": "Email is already registered"},
+        422: {"description": "Registration payload failed validation"},
+    },
+)
+async def register(
+    payload: UserCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    """Register a public student or company account."""
+    try:
+        return await register_user(db, payload)
+    except DuplicateEmailError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already registered",
+        ) from exc
 
 
 @router.get(
