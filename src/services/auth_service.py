@@ -155,6 +155,62 @@ async def rotate_refresh_token(
     )
 
 
+async def revoke_session(
+    db: AsyncSession,
+    refresh_token: str,
+) -> None:
+    """Revoke an active refresh token session in db_auth.
+
+    Args:
+        db: Active asynchronous database session.
+        refresh_token: RS256 refresh token to revoke.
+
+    Raises:
+        InvalidRefreshTokenError: If token is invalid, expired, or already revoked.
+    """
+    try:
+        payload = decode_token(refresh_token)
+    except (TokenExpiredError, InvalidTokenError) as exc:
+        raise InvalidRefreshTokenError("Invalid or expired refresh token") from exc
+
+    if payload.get("type") != "refresh":
+        raise InvalidRefreshTokenError("Invalid or expired refresh token")
+
+    try:
+        user_id = uuid.UUID(str(payload["sub"]))
+        session_jti = uuid.UUID(str(payload["jti"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InvalidRefreshTokenError("Invalid or expired refresh token") from exc
+
+    consumed_hash = hash_token(refresh_token)
+    statement = (
+        select(RefreshToken)
+        .where(RefreshToken.token_hash == consumed_hash)
+        .with_for_update()
+    )
+
+    try:
+        result = await db.execute(statement)
+        record = result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+
+        if (
+            record is None
+            or record.is_revoked
+            or record.expires_at <= now
+            or record.id != session_jti
+            or record.user_id != user_id
+        ):
+            raise InvalidRefreshTokenError("Invalid or expired refresh token")
+
+        record.is_revoked = True
+        record.revoked_at = now
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+
 async def authenticate_user(
     db: AsyncSession,
     email: str,

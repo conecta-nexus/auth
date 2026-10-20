@@ -9,7 +9,14 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.schemas.auth import LoginRequest, TokenRefreshRequest, TokenResponse, VerifyResponse
+from src.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    LogoutResponse,
+    TokenRefreshRequest,
+    TokenResponse,
+    VerifyResponse,
+)
 from src.schemas.user import UserCreate, UserResponse
 from src.services.auth_service import (
     DuplicateEmailError,
@@ -18,6 +25,7 @@ from src.services.auth_service import (
     InvalidRefreshTokenError,
     login_user,
     register_user,
+    revoke_session,
     rotate_refresh_token,
 )
 from src.services.jwt_service import InvalidTokenError, TokenExpiredError, decode_token
@@ -199,3 +207,47 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is inactive or suspended",
         ) from exc
+
+
+@router.post(
+    "/logout",
+    response_model=LogoutResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Session revocation and logout",
+    description="Explicitly revokes active user session and invalidates the supplied refresh token.",
+    responses={
+        200: {"description": "Successfully logged out"},
+        401: {"description": "Invalid, expired, revoked, or missing refresh token"},
+    },
+)
+async def logout(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: LogoutRequest | None = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
+) -> LogoutResponse:
+    """Revoke session associated with the provided refresh token."""
+    refresh_token = (
+        payload.refresh_token
+        if payload and payload.refresh_token
+        else (credentials.credentials if credentials and credentials.credentials else None)
+    )
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        await revoke_session(db=db, refresh_token=refresh_token)
+    except InvalidRefreshTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    return LogoutResponse(message="Successfully logged out")
+
