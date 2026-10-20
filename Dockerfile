@@ -9,7 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT="/venv" \
-    PATH="/venv/bin:$PATH"
+    PATH="/venv/bin:$PATH" \
+    DATABASE_URL="postgresql+asyncpg://postgres:postgrespassword@postgres:5432/db_auth" \
+    DB_ECHO="false" \
+    APP_ENV="development"
 
 WORKDIR /app
 
