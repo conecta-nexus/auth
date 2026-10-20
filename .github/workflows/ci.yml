@@ -32,7 +32,7 @@ jobs:
       - name: Generate RSA Keys for Testing
         run: |
           mkdir -p certs
-          uv run python -c "from src.core.crypto import generate_rsa_key_pair; generate_rsa_key_pair()"
+          uv run python scripts/generate_keys.py --output-dir certs --force
 
       - name: Execute Pytest with Coverage
         run: |
