@@ -1,0 +1,39 @@
+name: CI - Auth Microservice
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  test:
+    name: Run Unit & Integration Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Dependencies
+        run: uv sync --frozen || uv sync
+
+      - name: Generate RSA Keys for Testing
+        run: |
+          mkdir -p certs
+          uv run python -c "from src.core.crypto import generate_rsa_key_pair; generate_rsa_key_pair()"
+
+      - name: Execute Pytest with Coverage
+        run: |
+          uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80
