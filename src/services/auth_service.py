@@ -21,7 +21,13 @@ from src.models.user import User
 from src.repositories.user_repository import UserRepository
 from src.schemas.auth import TokenResponse
 from src.schemas.user import UserCreate
-from src.services.jwt_service import create_access_token, create_refresh_token
+from src.services.jwt_service import (
+    InvalidTokenError,
+    TokenExpiredError,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+)
 
 
 class AuthServiceError(Exception):
@@ -38,6 +44,10 @@ class InactiveAccountError(AuthServiceError):
 
 class DuplicateEmailError(AuthServiceError):
     """Raised when a registration email is already persisted."""
+
+
+class InvalidRefreshTokenError(AuthServiceError):
+    """Raised when a refresh token cannot be safely rotated."""
 
 
 async def register_user(db: AsyncSession, user_in: UserCreate) -> User:
@@ -61,6 +71,88 @@ async def register_user(db: AsyncSession, user_in: UserCreate) -> User:
 def hash_token(token: str) -> str:
     """Generate SHA-256 hash of a token string for secure database persistence."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def rotate_refresh_token(
+    db: AsyncSession,
+    refresh_token: str,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
+) -> TokenResponse:
+    """Atomically consume one refresh token and issue its replacement pair."""
+    try:
+        payload = decode_token(refresh_token)
+    except (TokenExpiredError, InvalidTokenError) as exc:
+        raise InvalidRefreshTokenError("Invalid or expired refresh token") from exc
+
+    if payload.get("type") != "refresh":
+        raise InvalidRefreshTokenError("Invalid or expired refresh token")
+
+    try:
+        user_id = uuid.UUID(str(payload["sub"]))
+        consumed_jti = uuid.UUID(str(payload["jti"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InvalidRefreshTokenError("Invalid or expired refresh token") from exc
+
+    consumed_hash = hash_token(refresh_token)
+    statement = (
+        select(RefreshToken)
+        .where(RefreshToken.token_hash == consumed_hash)
+        .with_for_update()
+    )
+
+    try:
+        result = await db.execute(statement)
+        consumed_record = result.scalar_one_or_none()
+        now = datetime.now(timezone.utc)
+
+        if (
+            consumed_record is None
+            or consumed_record.is_revoked
+            or consumed_record.expires_at <= now
+            or consumed_record.id != consumed_jti
+            or consumed_record.user_id != user_id
+        ):
+            raise InvalidRefreshTokenError("Invalid or expired refresh token")
+
+        user = await UserRepository.get_by_id(db, user_id)
+        if user is None:
+            raise InvalidRefreshTokenError("Invalid or expired refresh token")
+        if not user.is_active:
+            raise InactiveAccountError("Account is inactive or suspended")
+
+        consumed_record.is_revoked = True
+        consumed_record.revoked_at = now
+
+        session_jti = uuid.uuid4()
+        access_jti = uuid.uuid4()
+        access_token = create_access_token(user, jti=access_jti)
+        rotated_refresh_token = create_refresh_token(user, jti=session_jti)
+        rotated_record = RefreshToken(
+            id=session_jti,
+            user_id=user.id,
+            token_hash=hash_token(rotated_refresh_token),
+            expires_at=now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+            is_revoked=False,
+            revoked_at=None,
+            ip_address=client_ip[:45] if client_ip else None,
+            user_agent=user_agent[:512] if user_agent else None,
+        )
+        db.add(rotated_record)
+        await db.commit()
+    except (InvalidRefreshTokenError, InactiveAccountError):
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=rotated_refresh_token,
+        token_type="bearer",
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
 
 async def authenticate_user(

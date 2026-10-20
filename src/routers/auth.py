@@ -9,14 +9,16 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.schemas.auth import LoginRequest, TokenResponse, VerifyResponse
+from src.schemas.auth import LoginRequest, TokenRefreshRequest, TokenResponse, VerifyResponse
 from src.schemas.user import UserCreate, UserResponse
 from src.services.auth_service import (
     DuplicateEmailError,
     InactiveAccountError,
     InvalidCredentialsError,
+    InvalidRefreshTokenError,
     login_user,
     register_user,
+    rotate_refresh_token,
 )
 from src.services.jwt_service import InvalidTokenError, TokenExpiredError, decode_token
 
@@ -108,6 +110,47 @@ def verify_session(
         role=str(payload.get("role", "")),
         scopes=scopes,
     )
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        401: {"description": "Invalid or expired refresh token"},
+        403: {"description": "Account is inactive or suspended"},
+    },
+)
+async def refresh_session(
+    request: Request,
+    payload: TokenRefreshRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponse:
+    """Rotate a refresh token and return a new token pair."""
+    client_ip = request.headers.get("x-forwarded-for") or (
+        request.client.host if request.client else None
+    )
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    try:
+        return await rotate_refresh_token(
+            db=db,
+            refresh_token=payload.refresh_token,
+            client_ip=client_ip,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except InvalidRefreshTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except InactiveAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or suspended",
+        ) from exc
 
 
 @router.post(
