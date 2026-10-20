@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example
+
+# Cryptographic Keys (ADR-002)
+*.pem
+certs/
+keys/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+# Databases
+*.sqlite3
+*.db
+db.sqlite3
+
+# Agent tooling
+.agents/
+.agent/
+.codex/
+.impeccable/
+*.pdf
+.pdf/

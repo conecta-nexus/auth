@@ -1,0 +1,253 @@
+"""Authentication endpoints for session verification and OAuth2 token operations."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.database import get_db
+from src.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    LogoutResponse,
+    TokenRefreshRequest,
+    TokenResponse,
+    VerifyResponse,
+)
+from src.schemas.user import UserCreate, UserResponse
+from src.services.auth_service import (
+    DuplicateEmailError,
+    InactiveAccountError,
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+    login_user,
+    register_user,
+    revoke_session,
+    rotate_refresh_token,
+)
+from src.services.jwt_service import InvalidTokenError, TokenExpiredError, decode_token
+
+router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        201: {"description": "User account created"},
+        409: {"description": "Email is already registered"},
+        422: {"description": "Registration payload failed validation"},
+    },
+)
+async def register(
+    payload: UserCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    """Register a public student or company account."""
+    try:
+        return await register_user(db, payload)
+    except DuplicateEmailError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already registered",
+        ) from exc
+
+
+@router.get(
+    "/verify",
+    response_model=VerifyResponse,
+    summary="High-performance session verification",
+    description=(
+        "Stateless token signature and scope verification for API Gateway and "
+        "downstream microservices with sub-50ms latency (DoD auth / RF03)."
+    ),
+    responses={
+        200: {"description": "Session is active and token is cryptographically valid"},
+        401: {"description": "Missing, expired, or invalid Bearer access token"},
+    },
+)
+def verify_session(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> VerifyResponse:
+    """Validate Bearer token statelessly using RSA public key."""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Bearer authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = credentials.credentials
+
+    try:
+        payload = decode_token(token)
+    except TokenExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": 'Bearer error="invalid_token", error_description="The token has expired"'},
+        ) from exc
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token signature or claims",
+            headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+        ) from exc
+
+    # Ensure token is an access token, not a refresh token
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type: access token required",
+            headers={"WWW-Authenticate": 'Bearer error="invalid_token"'},
+        )
+
+    raw_scopes = payload.get("scope", "")
+    scopes = raw_scopes.split() if isinstance(raw_scopes, str) and raw_scopes.strip() else []
+
+    return VerifyResponse(
+        valid=True,
+        user_id=str(payload.get("sub", "")),
+        email=str(payload.get("email", "")),
+        role=str(payload.get("role", "")),
+        scopes=scopes,
+    )
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        401: {"description": "Invalid or expired refresh token"},
+        403: {"description": "Account is inactive or suspended"},
+    },
+)
+async def refresh_session(
+    request: Request,
+    payload: TokenRefreshRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponse:
+    """Rotate a refresh token and return a new token pair."""
+    client_ip = request.headers.get("x-forwarded-for") or (
+        request.client.host if request.client else None
+    )
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    try:
+        return await rotate_refresh_token(
+            db=db,
+            refresh_token=payload.refresh_token,
+            client_ip=client_ip,
+            user_agent=request.headers.get("user-agent"),
+        )
+    except InvalidRefreshTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except InactiveAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or suspended",
+        ) from exc
+
+
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    summary="OAuth2 password authentication and session initiation",
+    description=(
+        "Authenticates user credentials, verifies account active status, "
+        "issues RS256 access and refresh tokens, and records session metadata in db_auth."
+    ),
+    responses={
+        200: {"description": "Authentication successful, token pair issued"},
+        401: {"description": "Invalid email or password"},
+        403: {"description": "Account is inactive or suspended"},
+    },
+)
+async def login(
+    request: Request,
+    payload: LoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponse:
+    """Authenticate user with email and password, issuing access and refresh tokens."""
+    client_ip = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+
+    user_agent = request.headers.get("user-agent")
+
+    try:
+        return await login_user(
+            db=db,
+            email=payload.email,
+            password=payload.password,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+    except InvalidCredentialsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    except InactiveAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or suspended",
+        ) from exc
+
+
+@router.post(
+    "/logout",
+    response_model=LogoutResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Session revocation and logout",
+    description="Explicitly revokes active user session and invalidates the supplied refresh token.",
+    responses={
+        200: {"description": "Successfully logged out"},
+        401: {"description": "Invalid, expired, revoked, or missing refresh token"},
+    },
+)
+async def logout(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    payload: LogoutRequest | None = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
+) -> LogoutResponse:
+    """Revoke session associated with the provided refresh token."""
+    refresh_token = (
+        payload.refresh_token
+        if payload and payload.refresh_token
+        else (credentials.credentials if credentials and credentials.credentials else None)
+    )
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        await revoke_session(db=db, refresh_token=refresh_token)
+    except InvalidRefreshTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    return LogoutResponse(message="Successfully logged out")
+
