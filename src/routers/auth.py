@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +74,7 @@ async def register(
 )
 def verify_session(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    response: Response,
 ) -> VerifyResponse:
     """Validate Bearer token statelessly using RSA public key."""
     if not credentials or not credentials.credentials:
@@ -111,13 +112,44 @@ def verify_session(
     raw_scopes = payload.get("scope", "")
     scopes = raw_scopes.split() if isinstance(raw_scopes, str) and raw_scopes.strip() else []
 
+    user_id_str = str(payload.get("sub", ""))
+    email_str = str(payload.get("email", ""))
+    role_str = str(payload.get("role", ""))
+    scopes_str = raw_scopes if isinstance(raw_scopes, str) else " ".join(scopes)
+
+    # Expose identity headers for API Gateway consumption (auth_request_set)
+    response.headers["X-User-Id"] = user_id_str
+    response.headers["X-User-Email"] = email_str
+    response.headers["X-User-Role"] = role_str
+    response.headers["X-User-Scopes"] = scopes_str
+
     return VerifyResponse(
         valid=True,
-        user_id=str(payload.get("sub", "")),
-        email=str(payload.get("email", "")),
-        role=str(payload.get("role", "")),
+        user_id=user_id_str,
+        email=email_str,
+        role=role_str,
         scopes=scopes,
     )
+
+
+@router.get(
+    "/certs",
+    summary="Get RSA Public Key",
+    description="Returns the RSA public key used for RS256 JWT signature verification.",
+    responses={
+        200: {"description": "RSA public key metadata in PEM format"},
+    },
+)
+def get_public_certs() -> dict[str, str]:
+    """Expose RSA public key for downstream service and API Gateway verification."""
+    from src.core.crypto import load_public_key_pem
+
+    return {
+        "alg": "RS256",
+        "kty": "RSA",
+        "use": "sig",
+        "public_key": load_public_key_pem(),
+    }
 
 
 @router.post(
