@@ -15,7 +15,11 @@ from fastapi.testclient import TestClient
 
 from src.auth.main import app
 from src.core.crypto import load_rsa_keys
-from src.services.jwt_service import create_access_token, create_refresh_token
+from src.services.jwt_service import (
+    create_access_token,
+    create_password_reset_token,
+    create_refresh_token,
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -94,3 +98,9 @@ def expired_access_token(sample_student_user: Dict[str, Any]) -> str:
 def student_refresh_token(sample_student_user: Dict[str, Any]) -> str:
     """Valid refresh token for a student."""
     return create_refresh_token(sample_student_user)
+
+
+@pytest.fixture
+def student_password_reset_token(sample_student_user: Dict[str, Any]) -> str:
+    """Valid password reset token for a student."""
+    return create_password_reset_token(sample_student_user)
