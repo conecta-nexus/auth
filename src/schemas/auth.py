@@ -36,3 +36,16 @@ class TokenRefreshRequest(BaseModel):
     """Payload containing the refresh token to rotate."""
 
     refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    """Payload containing the refresh token to revoke upon logout."""
+
+    refresh_token: str | None = Field(default=None, description="RS256 signed refresh token to revoke")
+
+
+class LogoutResponse(BaseModel):
+    """Response payload for explicit session logout."""
+
+    message: str = Field(default="Successfully logged out", description="Logout status message")
+
