@@ -30,3 +30,9 @@ class LoginRequest(BaseModel):
 
     email: str = Field(description="User primary email address")
     password: str = Field(description="User plaintext password")
+
+
+class TokenRefreshRequest(BaseModel):
+    """Payload containing the refresh token to rotate."""
+
+    refresh_token: str
