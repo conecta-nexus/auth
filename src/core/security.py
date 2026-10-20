@@ -23,6 +23,7 @@ JWT_AUDIENCES: Final[list[str]] = [
 
 ACCESS_TOKEN_EXPIRE_MINUTES: Final[int] = 15
 REFRESH_TOKEN_EXPIRE_DAYS: Final[int] = 7
+PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Final[int] = 15
 
 # RBAC OAuth2 Scopes Matrix per Role (Section 4.1)
 STUDENT_SCOPES: Final[list[str]] = [

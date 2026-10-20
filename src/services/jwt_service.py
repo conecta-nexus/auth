@@ -19,6 +19,7 @@ from src.core.security import (
     JWT_ALGORITHM,
     JWT_AUDIENCES,
     JWT_ISSUER,
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
     REFRESH_TOKEN_EXPIRE_DAYS,
     get_scopes_string_for_role,
 )
@@ -137,6 +138,47 @@ def create_refresh_token(
         "exp": int(exp.timestamp()),
         "type": "refresh",
         "role": str(role).upper(),
+    }
+
+    private_pem = load_private_key_pem()
+    return jwt.encode(payload, private_pem, algorithm=JWT_ALGORITHM)
+
+
+def create_password_reset_token(
+    user: Any,
+    jti: UUID | str | None = None,
+    expires_delta: timedelta | None = None,
+) -> str:
+    """Create a signed RS256 single-use password reset token for account recovery.
+
+    Args:
+        user: User domain model or dict containing id and email.
+        jti: Unique token identifier (stored in db_auth password_reset_tokens).
+        expires_delta: Optional custom duration. Defaults to 15 minutes.
+
+    Returns:
+        Encoded RS256 JWT string with type='password_reset'.
+    """
+    user_id = _extract_user_attribute(user, "id")
+    if not user_id:
+        raise ValueError("User must have an 'id' attribute.")
+
+    email = _extract_user_attribute(user, "email", "")
+    token_jti = str(jti) if jti is not None else str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    lifetime = expires_delta or timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
+    exp = now + lifetime
+
+    payload = {
+        "iss": JWT_ISSUER,
+        "aud": list(JWT_AUDIENCES),
+        "sub": str(user_id),
+        "jti": token_jti,
+        "iat": int(now.timestamp()),
+        "nbf": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "type": "password_reset",
+        "email": email,
     }
 
     private_pem = load_private_key_pem()
