@@ -28,6 +28,10 @@ COPY . .
 # Final project sync
 RUN uv sync --frozen --no-dev || uv sync --no-dev
 
+# Ensure entrypoint and key generation scripts are executable
+RUN chmod +x entrypoint.sh scripts/generate_keys.py
+
 EXPOSE 8000
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "src.auth.main:app", "--host", "0.0.0.0", "--port", "8000"]
