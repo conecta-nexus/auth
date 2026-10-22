@@ -38,6 +38,12 @@ def test_verify_valid_student_token(client):
     assert "profile:student:read" in data["scopes"]
     assert "consent:read" in data["scopes"]
 
+    # Validate identity headers forwarded to API Gateway
+    assert response.headers.get("X-User-Id") == str(user_id)
+    assert response.headers.get("X-User-Email") == "student@ufps.edu.co"
+    assert response.headers.get("X-User-Role") == "STUDENT"
+    assert "profile:student:read" in response.headers.get("X-User-Scopes", "")
+
 
 def test_verify_valid_company_token(client):
     user_id = uuid.uuid4()
@@ -152,3 +158,23 @@ def test_verify_sub_50ms_sla_benchmark(client):
     # Strictly enforce SLA < 50ms
     assert avg_latency < 50.0, f"Average latency {avg_latency}ms exceeded 50ms SLA"
     assert p95_latency < 50.0, f"P95 latency {p95_latency}ms exceeded 50ms SLA"
+
+
+def test_public_certs_endpoint(client):
+    response = client.get("/api/v1/auth/certs")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["alg"] == "RS256"
+    assert data["kty"] == "RSA"
+    assert data["use"] == "sig"
+    assert "-----BEGIN PUBLIC KEY-----" in data["public_key"]
+
+
+def test_auth_health_endpoints(client):
+    r1 = client.get("/health")
+    assert r1.status_code == 200
+    assert r1.json() == {"status": "healthy"}
+
+    r2 = client.get("/api/v1/auth/health")
+    assert r2.status_code == 200
+    assert r2.json() == {"status": "healthy"}

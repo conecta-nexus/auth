@@ -9,7 +9,10 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT="/venv" \
-    PATH="/venv/bin:$PATH"
+    PATH="/venv/bin:$PATH" \
+    DATABASE_URL="postgresql+asyncpg://postgres:postgrespassword@postgres:5432/db_auth" \
+    DB_ECHO="false" \
+    APP_ENV="development"
 
 WORKDIR /app
 
@@ -25,6 +28,10 @@ COPY . .
 # Final project sync
 RUN uv sync --frozen --no-dev || uv sync --no-dev
 
+# Ensure entrypoint and key generation scripts are executable
+RUN chmod +x entrypoint.sh scripts/generate_keys.py
+
 EXPOSE 8000
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "src.auth.main:app", "--host", "0.0.0.0", "--port", "8000"]

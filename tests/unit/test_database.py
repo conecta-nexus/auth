@@ -31,6 +31,18 @@ def test_settings_load_required_environment_variables(monkeypatch: pytest.Monkey
     assert loaded_settings.app_env == "testing"
 
 
+def test_settings_defaults_and_url_normalization(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DB_ECHO", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@postgres:5432/db_auth")
+
+    loaded_settings = Settings(_env_file=None)
+
+    assert loaded_settings.database_url == "postgresql+asyncpg://user:pass@postgres:5432/db_auth"
+    assert loaded_settings.db_echo is False
+    assert loaded_settings.app_env == "development"
+
+
 def test_async_engine_uses_postgresql_asyncpg() -> None:
     assert isinstance(async_engine, AsyncEngine)
     assert async_engine.dialect.name == "postgresql"
